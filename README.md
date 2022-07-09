@@ -15,3 +15,34 @@ QLearning在训练约800次后的效果图
 ![](./pic/ddpg.png "DDPG在训练约800次后不同action对应的critic网络输出")
 
 DDPG在训练约800次后不同action对应的critic网络输出
+
+
+# 安装依赖
+
+```python
+pip install pyautogui
+```
+
+# 实现细节
+## 从图片上找到相似的图片
+
+screen_shot_im: 灰度图，原始图片
+
+self.restart_btn_img: 灰度图，需要找的图片内容
+
+```python
+def _find_start_btn(self, screen_shot_im, find_shot_im):
+    """
+    找到开始游戏位置的图标
+    """
+    result = cv2.matchTemplate(screen_shot_im,
+                                find_shot_im,
+                                cv2.TM_CCOEFF_NORMED)
+    if result.max() > 0.8:
+        y,x = np.unravel_index(result.argmax(),result.shape)
+        y += find_shot_im.shape[0] // 2
+        x += find_shot_im.shape[1] // 2
+        return x, y
+    else:
+        return -1, -1
+```
