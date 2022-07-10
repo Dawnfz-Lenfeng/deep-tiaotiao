@@ -169,8 +169,8 @@ class Agent:
     def act(self, state):
         act = self.actor(state)
 
-        # noise = self.epsilon * self.add_noise(act.numpy()[0, 0], 0, 0.5, 0.5)
-        noise = 0
+        noise = self.epsilon * self.add_noise(act.numpy()[0, 0], 0, 0.5, 0.5)
+        # noise = 0
         
         print('act:',act.numpy(),'noise:',noise,'sum:',(act+noise).numpy())
         
@@ -264,7 +264,7 @@ class Agent:
         critic_grads = [-i for i in critic_grads]
         # print(critic_outputs, a_for_grad)
         # print(critic_grads)
-        tf.concat(critic_grads)
+        critic_grads = tf.reshape(tf.concat(critic_grads, axis=0), [-1, 1])
 
         actor_trainable_variables = self.actor.trainable_variables
         params_grad = actor_tape1.gradient(a_for_grad, actor_trainable_variables, output_gradients=critic_grads)
