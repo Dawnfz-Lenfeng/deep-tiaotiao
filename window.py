@@ -59,9 +59,16 @@ class GameWindow:
         y = self.game_region[1] + self.game_region[3] // 2
         return x, y
 
-    def _click_button(
-        self, screen: np.ndarray, template: np.ndarray
-    ):
+    def get_state(self) -> np.ndarray:
+        """获取当前状态特征"""
+        screen = self.get_screenshot()
+        # 缩放到28x28
+        resized = cv2.resize(screen, (28, 28))
+        # 归一化到[0,1]
+        normalized = resized.astype(np.float32) / 255.0
+        return normalized.reshape(-1)
+
+    def _click_button(self, screen: np.ndarray, template: np.ndarray):
         """点击按钮, 重启或开始"""
         result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)

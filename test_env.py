@@ -20,7 +20,7 @@ def test_reset_and_step():
         print(f"Press duration: {env._to_duration(action)}ms")
 
         next_state, reward, done = env.step(action)
-        print(f"Reward: {reward}, Done: {done}")
+        print(f"Reward: {reward}, Done: {done}, Next state shape: {next_state.shape}")
 
         if done:
             print("Game Over! Resetting...")
@@ -37,11 +37,6 @@ def test_window_detection():
     # 测试截图
     screen = env.window.get_screenshot()
     print(f"Screenshot shape: {screen.shape}")
-
-    # 显示截图
-    cv2.imshow("Screenshot", screen)
-    # cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
     # 测试结束检测
     done = env.window.check_done()

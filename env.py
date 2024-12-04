@@ -18,14 +18,12 @@ class Env:
         self.action_dim = 1
         self.action_bound = 1.0
 
-    def reset(self, is_show=False) -> np.ndarray:
+    def reset(self) -> np.ndarray:
         """重置环境"""
         # 重新定位游戏区域并重置游戏
         self.window.get_game_region()
         # 获取初始状态
-        state = self._get_state()
-        if is_show:
-            self._render_state(state)
+        state = self.window.get_state()
         return state
 
     def step(self, action: float) -> tuple[np.ndarray, float, bool]:
@@ -49,7 +47,7 @@ class Env:
         time.sleep(4)
 
         # 获取新状态和奖励
-        next_state = self._get_state()
+        next_state = self.window.get_state()
         done = self.window.check_done()
 
         if done:
@@ -60,23 +58,8 @@ class Env:
 
         return next_state, reward, done
 
-    def _get_state(self) -> np.ndarray:
-        """获取当前状态特征"""
-        screen = self.window.get_screenshot()
-        # 缩放到28x28
-        resized = cv2.resize(screen, (28, 28))
-        # 归一化到[0,1]
-        normalized = resized.astype(np.float32) / 255.0
-        return normalized.reshape(-1)
-
     def _to_duration(self, action: float) -> int:
         """将动作值转换为按压时间(ms)"""
-        # 将[-1,0]映射到[300,1100]ms
+        # 将[-1,1]映射到[300,1100]ms
         normalized = np.clip(action, -1, 1)
         return int(300 * normalized + 700)
-
-    def _render_state(self, state: np.ndarray) -> None:
-        """显示当前状态"""
-        image = state.reshape(28, 28)
-        cv2.imshow("Game State", image)
-        cv2.waitKey(1)
