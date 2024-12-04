@@ -1,15 +1,17 @@
-import tensorflow as tf
-import time
 import copy
 import os
 import pickle
+import time
+
+import tensorflow as tf
+
 from DDPG import Agent
 from GetEnv import GetEnv
 
-file_memory = "./data/ddpg_mem.p"
-file_score = "./data/ddpg_score.p"
+file_memory = "D:/pythoncode/Deeplearning/data/ddpg_mem.p"
+file_score = "D:/pythoncode/Deeplearning/data/ddpg_score.p"
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     all_time = time.time()
     # get_env = GetEnv()
 
@@ -34,7 +36,7 @@ if __name__ == '__main__':
     # for e in range(episodes):
     #     state = get_env.reset(is_show=False)
     #     start_time = time.time()
-        
+
     #     loss = 0
     #     for time_t in range(100000):
 
@@ -84,14 +86,19 @@ if __name__ == '__main__':
         with open(file_memory, "rb") as f:
             agent.memory = pickle.load(f)
 
-    checkpoint_path = "./checkpoints/ddpg_checkpoint"
-    ckpt = tf.train.Checkpoint(actor=agent.actor, actor_target=agent.actor_target, critic=agent.critic, critic_target=agent.critic_target)
+    checkpoint_path = "D:/pythoncode/Deeplearning/checkpoints/ddpg_checkpoint.pth"
+    ckpt = tf.train.Checkpoint(
+        actor=agent.actor,
+        actor_target=agent.actor_target,
+        critic=agent.critic,
+        critic_target=agent.critic_target,
+    )
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
 
     # 如果检查点存在，则恢复最新的检查点。
     if ckpt_manager.latest_checkpoint:
         ckpt.restore(ckpt_manager.latest_checkpoint)
-        print('Latest checkpoint restored!!')
+        print("Latest checkpoint restored!!")
 
     scores = []
     episodes = 1000
@@ -99,9 +106,9 @@ if __name__ == '__main__':
     for e in range(episodes):
         state = get_env.reset(is_show=False)
         start_time = time.time()
-        
+
         loss = 0
-        for time_t in range(100000):
+        for time_t in range(10000):
 
             # 选择行为
             action = agent.actor(state)
@@ -117,11 +124,24 @@ if __name__ == '__main__':
             # 除非agent没有完成目标
             if done:
                 # 打印分数并且跳出游戏循环
-                print("Epoch: {}/{}, score: {}, use time: {}".format(e + 1, episodes, time_t, time.time() - start_time))
+                print(
+                    "Epoch: {}/{}, score: {}, use time: {}".format(
+                        e + 1, episodes, time_t, time.time() - start_time
+                    )
+                )
                 scores.append(time_t)
                 break
 
-        steps += (time_t + 1)
+        steps += time_t + 1
 
-        print('Epoch:', e, 'step:', steps, 'epsilon:', agent.epsilon, 'Max score', max(scores))
+        print(
+            "Epoch:",
+            e,
+            "step:",
+            steps,
+            "epsilon:",
+            agent.epsilon,
+            "Max score",
+            max(scores),
+        )
         print("\n")

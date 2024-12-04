@@ -1,0 +1,7 @@
+tensorflow
+matplotlib
+seaborn
+opencv-python
+pyautogui
+pydirectinput
+pywin32
