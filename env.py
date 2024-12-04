@@ -1,0 +1,82 @@
+import time
+
+import cv2
+import numpy as np
+import pyautogui
+
+from window import GameWindow
+
+
+class Env:
+    """游戏环境"""
+
+    def __init__(self):
+        self.window = GameWindow()
+        # 状态空间：游戏截图
+        self.state_dim = 784  # 28*28
+        # 动作空间：按压时间
+        self.action_dim = 1
+        self.action_bound = 1.0
+
+    def reset(self, is_show=False) -> np.ndarray:
+        """重置环境"""
+        # 重新定位游戏区域并重置游戏
+        self.window.get_game_region()
+        # 获取初始状态
+        state = self._get_state()
+        if is_show:
+            self._render_state(state)
+        return state
+
+    def step(self, action: float) -> tuple[np.ndarray, float, bool]:
+        """执行一步动作
+        Args:
+            action: [0,1] 范围内的值，用于计算按压时间
+        Returns:
+            state: 游戏画面特征
+            reward: 奖励值 (+1成功/-1失败)
+            done: 是否结束
+        """
+        # 获取点击位置
+        x, y = self.window.get_click_position()
+        # 计算按压时间
+        duration = self._to_duration(action)
+        # 执行点击
+        pyautogui.mouseDown(x, y)
+        pyautogui.sleep(duration / 1000.0)
+        pyautogui.mouseUp()
+        # 等待动画结束
+        time.sleep(4)
+
+        # 获取新状态和奖励
+        next_state = self._get_state()
+        done = self.window.check_done()
+
+        if done:
+            self.reset()
+            reward = -1
+        else:
+            reward = 1
+
+        return next_state, reward, done
+
+    def _get_state(self) -> np.ndarray:
+        """获取当前状态特征"""
+        screen = self.window.get_screenshot()
+        # 缩放到28x28
+        resized = cv2.resize(screen, (28, 28))
+        # 归一化到[0,1]
+        normalized = resized.astype(np.float32) / 255.0
+        return normalized.reshape(-1)
+
+    def _to_duration(self, action: float) -> int:
+        """将动作值转换为按压时间(ms)"""
+        # 将[-1,0]映射到[300,1100]ms
+        normalized = np.clip(action, -1, 1)
+        return int(300 * normalized + 700)
+
+    def _render_state(self, state: np.ndarray) -> None:
+        """显示当前状态"""
+        image = state.reshape(28, 28)
+        cv2.imshow("Game State", image)
+        cv2.waitKey(1)

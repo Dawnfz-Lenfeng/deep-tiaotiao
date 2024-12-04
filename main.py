@@ -1,147 +1,129 @@
 import copy
-import os
 import pickle
 import time
 
 import tensorflow as tf
 
+from config import Config
 from DDPG import Agent
-from GetEnv import GetEnv
+from env import Env
 
-file_memory = "D:/pythoncode/Deeplearning/data/ddpg_mem.p"
-file_score = "D:/pythoncode/Deeplearning/data/ddpg_score.p"
 
-if __name__ == "__main__":
-    all_time = time.time()
-    # get_env = GetEnv()
+class DDPGTrainer:
+    def __init__(self):
+        self.config = Config()
+        self.env = Env()
+        self.agent = Agent(self.env)
+        self.setup_checkpointing()
+        self.load_memory()
 
-    # agent = Agent(get_env)
+    def setup_checkpointing(self):
+        """设置检查点"""
+        self.ckpt = tf.train.Checkpoint(
+            actor=self.agent.actor,
+            actor_target=self.agent.actor_target,
+            critic=self.agent.critic,
+            critic_target=self.agent.critic_target,
+        )
+        self.ckpt_manager = tf.train.CheckpointManager(
+            self.ckpt, self.config.CHECKPOINT_PATH, max_to_keep=5
+        )
 
-    # if os.path.exists(file_memory):
-    #     with open(file_memory, "rb") as f:
-    #         agent.memory = pickle.load(f)
+        if self.ckpt_manager.latest_checkpoint:
+            self.ckpt.restore(self.ckpt_manager.latest_checkpoint)
+            print("Latest checkpoint restored!")
 
-    # checkpoint_path = "./checkpoints/ddpg_checkpoint"
-    # ckpt = tf.train.Checkpoint(actor=agent.actor, actor_target=agent.actor_target, critic=agent.critic, critic_target=agent.critic_target)
-    # ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
+    def load_memory(self):
+        if self.config.MEMORY_FILE.exists():
+            with open(self.config.MEMORY_FILE, "rb") as f:
+                self.agent.memory = pickle.load(f)
 
-    # # 如果检查点存在，则恢复最新的检查点。
-    # if ckpt_manager.latest_checkpoint:
-    #     ckpt.restore(ckpt_manager.latest_checkpoint)
-    #     print('Latest checkpoint restored!!')
+    def save_progress(self, scores: list[int], episode: int, steps: int):
+        save_data = (scores, episode, steps)
+        with self.config.SCORES_FILE.open("wb") as f:
+            pickle.dump(save_data, f)
+        with self.config.MEMORY_FILE.open("wb") as f:
+            pickle.dump(self.agent.memory, f)
+        self.ckpt_manager.save()
 
-    # scores = []
-    # episodes = 1000
-    # steps = 0
-    # for e in range(episodes):
-    #     state = get_env.reset(is_show=False)
-    #     start_time = time.time()
-
-    #     loss = 0
-    #     for time_t in range(100000):
-
-    #         # 选择行为
-    #         action = agent.act(state)
-
-    #         # 在环境中施加行为推动游戏进行
-    #         next_state, reward, done = get_env.touch_in_step(action)
-    #         # get_env.touch_in_step(action)
-
-    #         # 记忆先前的状态，行为，回报与下一个状态
-    #         agent.remember(state, action, reward, next_state, done)
-
-    #         # 使下一个状态成为下一帧的新状态
-    #         state = copy.deepcopy(next_state)
-
-    #         loss += agent.replay()
-
-    #         # 如果游戏结束done被置为ture
-    #         # 除非agent没有完成目标
-    #         if done:
-    #             # 打印分数并且跳出游戏循环
-    #             print("Epoch: {}/{}, score: {}, use time: {}".format(e + 1, episodes, time_t, time.time() - start_time))
-    #             scores.append(time_t)
-    #             break
-
-    #     steps += (time_t + 1)
-    #     loss /= (time_t + 1)
-
-    #     print('Epoch:', e, 'step:', steps, 'epsilon:', agent.epsilon, 'loss:', loss.numpy(), 'Max score', max(scores))
-    #     print("\n")
-
-    #     if e % 10 == 0 and steps != 0:
-    #         save_data = (scores, e, steps)
-    #         pickle.dump(save_data, open(file_score,'wb'))
-    #         pickle.dump(agent.memory, open(file_memory,'wb'))
-
-    #         ckpt_save_path = ckpt_manager.save()
-    #         print("Use All time: {}".format(time.time() - all_time))
-
-    """ test"""
-    get_env = GetEnv()
-
-    agent = Agent(get_env)
-
-    if os.path.exists(file_memory):
-        with open(file_memory, "rb") as f:
-            agent.memory = pickle.load(f)
-
-    checkpoint_path = "D:/pythoncode/Deeplearning/checkpoints/ddpg_checkpoint.pth"
-    ckpt = tf.train.Checkpoint(
-        actor=agent.actor,
-        actor_target=agent.actor_target,
-        critic=agent.critic,
-        critic_target=agent.critic_target,
-    )
-    ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
-
-    # 如果检查点存在，则恢复最新的检查点。
-    if ckpt_manager.latest_checkpoint:
-        ckpt.restore(ckpt_manager.latest_checkpoint)
-        print("Latest checkpoint restored!!")
-
-    scores = []
-    episodes = 1000
-    steps = 0
-    for e in range(episodes):
-        state = get_env.reset(is_show=False)
+    def train(self):
         start_time = time.time()
+        scores = []
+        total_steps = 0
 
-        loss = 0
-        for time_t in range(10000):
+        for episode in range(self.config.EPISODES):
+            episode_score, episode_steps, episode_loss = self.run_training_episode()
+            total_steps += episode_steps
+            scores.append(episode_score)
 
-            # 选择行为
-            action = agent.actor(state)
+            print(
+                f"Episode: {episode}, Steps: {total_steps}, Epsilon: {self.agent.epsilon}, "
+                f"Loss: {episode_loss}, Max score: {max(scores)}"
+            )
 
-            # 在环境中施加行为推动游戏进行
-            next_state, reward, done = get_env.touch_in_step(action)
-            # get_env.touch_in_step(action)
+            if episode % self.config.SAVE_FREQUENCY == 0:
+                self.save_progress(scores, episode, total_steps)
+                print(f"Total training time: {time.time() - start_time:.2f}s")
 
-            # 使下一个状态成为下一帧的新状态
+    def run_training_episode(self):
+        state = self.env.reset(is_show=False)
+        episode_start_time = time.time()
+        total_loss = 0
+
+        for step in range(self.config.MAX_STEPS):
+            action = self.agent.act(state)
+            next_state, reward, done = self.env.step(action)
+
+            self.agent.remember(state, action, reward, next_state, done)
+            state = copy.deepcopy(next_state)
+            total_loss += self.agent.replay()
+
+            if done:
+                print(
+                    f"Episode completed in {step} steps, "
+                    f"Time: {time.time() - episode_start_time:.2f}s"
+                )
+                return step, step + 1, total_loss / (step + 1)
+
+        return (
+            self.config.MAX_STEPS - 1,
+            self.config.MAX_STEPS,
+            total_loss / self.config.MAX_STEPS,
+        )
+
+    def test(self):
+        scores = []
+
+        for episode in range(self.config.TEST_EPISODES):
+            episode_score = self.run_test_episode()
+            scores.append(episode_score)
+
+            print(
+                f"Test Episode: {episode}, Score: {episode_score}, "
+                f"Max Score: {max(scores)}"
+            )
+
+    def run_test_episode(self):
+        state = self.env.reset(is_show=False)
+
+        for step in range(self.config.TEST_MAX_STEPS):
+            action = self.agent.actor(state)
+            next_state, reward, done = self.env.touch_in_step(action)
             state = copy.deepcopy(next_state)
 
-            # 如果游戏结束done被置为ture
-            # 除非agent没有完成目标
             if done:
-                # 打印分数并且跳出游戏循环
-                print(
-                    "Epoch: {}/{}, score: {}, use time: {}".format(
-                        e + 1, episodes, time_t, time.time() - start_time
-                    )
-                )
-                scores.append(time_t)
-                break
+                return step
 
-        steps += time_t + 1
+        return self.config.TEST_MAX_STEPS - 1
 
-        print(
-            "Epoch:",
-            e,
-            "step:",
-            steps,
-            "epsilon:",
-            agent.epsilon,
-            "Max score",
-            max(scores),
-        )
-        print("\n")
+
+def main():
+    trainer = DDPGTrainer()
+
+    # Uncomment the one you want to run
+    # trainer.train()
+    trainer.test()
+
+
+if __name__ == "__main__":
+    main()
