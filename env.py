@@ -1,7 +1,4 @@
-import time
-
 import numpy as np
-import pyautogui
 
 from window import GameWindow
 
