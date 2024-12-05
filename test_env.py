@@ -1,6 +1,3 @@
-import time
-import cv2
-import numpy as np
 from env import Env
 
 
@@ -24,6 +21,7 @@ def test_reset_and_step():
 
         if done:
             print("Game Over! Resetting...")
+            env.reset()
 
 
 def test_window_detection():

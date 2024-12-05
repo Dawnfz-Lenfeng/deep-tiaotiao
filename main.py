@@ -66,7 +66,7 @@ class DDPGTrainer:
                 print(f"Total training time: {time.time() - start_time:.2f}s")
 
     def run_training_episode(self):
-        state = self.env.reset(is_show=False)
+        state = self.env.reset()
         episode_start_time = time.time()
         total_loss = 0
 

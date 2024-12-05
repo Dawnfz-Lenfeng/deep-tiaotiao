@@ -16,12 +16,12 @@ class GameWindow:
         self.game_region = None
         self.window_name = "跳一跳"  # 微信小程序窗口名称
 
-    def get_game_region(self) -> tuple[int, int, int, int]:
+    def get_game_region(self):
         """获取游戏区域并重置游戏"""
         # 查找游戏窗口
         hwnd = win32gui.FindWindow(None, self.window_name)
         if not hwnd:
-            return self.game_region
+            return
 
         # 设置窗口在最前面
         win32gui.SetForegroundWindow(hwnd)
@@ -37,8 +37,6 @@ class GameWindow:
         screen = self.get_screenshot()
         self._click_button(screen, self.start_btn)
 
-        return self.game_region
-
     def check_done(self) -> bool:
         """检查是否结束"""
         # 检测重启按钮是否出现
@@ -53,11 +51,17 @@ class GameWindow:
         gray = cv2.cvtColor(screen, cv2.COLOR_RGB2GRAY)  # 转灰度
         return gray
 
-    def get_click_position(self) -> tuple[int, int]:
-        """获取点击位置"""
+    def click_screen(self, duration: float):
+        """点击屏幕"""
+        # 获得点击位置
         x = self.game_region[0] + self.game_region[2] // 2
         y = self.game_region[1] + self.game_region[3] // 2
-        return x, y
+        # 执行点击
+        pyautogui.mouseDown(x, y)
+        pyautogui.sleep(duration / 1000.0)
+        pyautogui.mouseUp()
+        # 等待动画结束
+        time.sleep(4)
 
     def get_state(self) -> np.ndarray:
         """获取当前状态特征"""

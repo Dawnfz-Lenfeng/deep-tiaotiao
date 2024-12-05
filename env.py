@@ -1,6 +1,5 @@
 import time
 
-import cv2
 import numpy as np
 import pyautogui
 
@@ -35,26 +34,15 @@ class Env:
             reward: 奖励值 (+1成功/-1失败)
             done: 是否结束
         """
-        # 获取点击位置
-        x, y = self.window.get_click_position()
         # 计算按压时间
         duration = self._to_duration(action)
         # 执行点击
-        pyautogui.mouseDown(x, y)
-        pyautogui.sleep(duration / 1000.0)
-        pyautogui.mouseUp()
-        # 等待动画结束
-        time.sleep(4)
+        self.window.click_screen(duration)
 
         # 获取新状态和奖励
         next_state = self.window.get_state()
         done = self.window.check_done()
-
-        if done:
-            self.reset()
-            reward = -1
-        else:
-            reward = 1
+        reward = -1 if done else 1
 
         return next_state, reward, done
 
