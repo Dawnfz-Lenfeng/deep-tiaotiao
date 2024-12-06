@@ -46,6 +46,6 @@ class Env:
 
     def _to_duration(self, action: float) -> int:
         """将动作值转换为按压时间(ms)"""
-        # 将[-1,1]映射到[400,900]ms
+        # 将[-1,1]映射到[300,1100]ms
         normalized = np.clip(action, -1, 1)
-        return int(250 * normalized + 650)
+        return int(300 * normalized + 700)
