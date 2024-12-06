@@ -107,8 +107,11 @@ class DDPGTrainer:
         print(f"Checkpoint saved to {checkpoint_file}")
 
     def train(self):
-        start_time = time.time()
+        best_score = float('-inf')
+        patience = 10
+        no_improve = 0
         scores = []
+        start_time = time.time()
         total_steps = 0
 
         # 只在经验不足时进行预训练
@@ -117,15 +120,23 @@ class DDPGTrainer:
             self.agent.pretrain(num_episodes=10)
         else:
             print(f"Found {len(self.agent.memory)} experiences, skipping pretrain")
-
+        
         for episode in range(self.config.EPISODES):
-            episode_score, episode_steps, episode_loss = self.run_training_episode()
+            episode_score, episode_steps, episode_loss, total_reward = self.run_training_episode()
             total_steps += episode_steps
             scores.append(episode_score)
+            
+            # 检查是否有改进
+            if episode_score > best_score:
+                best_score = episode_score
+                no_improve = 0
+            else:
+                no_improve += 1
 
             print(
                 f"Episode: {episode}, Steps: {total_steps}, Epsilon: {self.agent.epsilon}, "
-                f"Loss: {episode_loss}, Max score: {max(scores)}"
+                f"Reward: {total_reward}, Loss: {episode_loss}, Score: {episode_score}, "
+                f"Best: {best_score}"
             )
 
             if episode % self.config.SAVE_FREQUENCY == 0:
@@ -136,6 +147,7 @@ class DDPGTrainer:
         state = self.env.reset()
         episode_start_time = time.time()
         total_loss = 0
+        total_reward = 0.0
 
         for step in range(self.config.MAX_STEPS):
             action = self.agent.act(state)
@@ -143,6 +155,7 @@ class DDPGTrainer:
 
             self.agent.remember(state, action, reward, next_state, done)
             state = copy.deepcopy(next_state)
+            total_reward += reward
             total_loss += self.agent.replay()
 
             if done:
@@ -150,12 +163,13 @@ class DDPGTrainer:
                     f"Episode completed in {step} steps, "
                     f"Time: {time.time() - episode_start_time:.2f}s"
                 )
-                return step, step + 1, total_loss / (step + 1)
+                return step, step + 1, total_loss / (step + 1), total_reward
 
         return (
             self.config.MAX_STEPS - 1,
             self.config.MAX_STEPS,
             total_loss / self.config.MAX_STEPS,
+            total_reward,
         )
 
     def test(self):

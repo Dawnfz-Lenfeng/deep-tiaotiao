@@ -48,7 +48,9 @@ class ReplayBuffer:
         self, batch_size: int
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """随机采样一个批次的经验"""
-        indices = np.random.choice(self.size, batch_size, replace=True)
+        replace = self.size < batch_size  # 小于于批次大小则允许重复采样
+        indices = np.random.choice(self.size, batch_size, replace=replace)
+
         batch: list[Experience] = [self.buffer[i] for i in indices]
 
         # 拆分批次数据
@@ -85,8 +87,6 @@ class ResBlock(nn.Module):
 
 
 class Actor(nn.Module):
-    """Actor 网络"""
-
     def __init__(self, state_dim: int, action_dim: int, action_bound: float) -> None:
         super(Actor, self).__init__()
         self.action_bound = action_bound
@@ -117,8 +117,6 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    """Critic 网络"""
-
     def __init__(self, state_dim: int, action_dim: int) -> None:
         super(Critic, self).__init__()
 
@@ -132,9 +130,6 @@ class Critic(nn.Module):
         # 合并层
         self.fc1 = nn.Linear(64 * 7 * 7 + 64, 200)
         self.fc2 = nn.Linear(200, 1)
-
-        # 添加动作正则化层
-        self.action_regularizer = nn.Linear(action_dim, 1)
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         # 处理状态
@@ -151,17 +146,14 @@ class Critic(nn.Module):
         x = F.relu(self.fc1(x))
         value = self.fc2(x)
 
-        # 添加动作惩罚项
-        action_penalty = -torch.abs(self.action_regularizer(action))
-
-        return value + action_penalty
+        return value
 
 
 class Agent:
     """DDPG智能体"""
 
     def __init__(
-        self, env: Env, memory_capacity: int = 10000, batch_size: int = 64
+        self, env: Env, memory_capacity: int = 1000, batch_size: int = 64
     ) -> None:
         self.env = env
         self.state_dim = env.state_dim
@@ -189,7 +181,7 @@ class Agent:
         # 修改训练超参数
         self.gamma = 0.99  # 折扣因子
         self.tau = 0.001  # 软更新参数
-        self.epsilon = 0.1  # 进一步增大初始探索率
+        self.epsilon = 0.4  # 进一步增大初始探索率
         self.epsilon_decay = 0.995  # 降低衰减速率
         self.epsilon_min = 0.01  # 提高最小探索值
 
@@ -207,10 +199,15 @@ class Agent:
 
         self.actor.train()
 
-        # 在当前策略基础上添加噪声
-        noise = np.random.normal(0, self.action_noise_std, size=self.action_dim)
-        noise = np.clip(noise, -self.action_noise_clip, self.action_noise_clip)
-        action = np.clip(action + noise, -self.action_bound, self.action_bound)
+        if np.random.rand() < self.epsilon:
+            action = np.random.uniform(
+                -self.action_bound, self.action_bound, size=self.action_dim
+            )
+        else:
+            # 在当前策略基础上添加噪声
+            noise = np.random.normal(0, self.action_noise_std, size=self.action_dim)
+            noise = np.clip(noise, -self.action_noise_clip, self.action_noise_clip)
+            action = np.clip(action + noise, -self.action_bound, self.action_bound)
 
         return action
 
@@ -265,14 +262,6 @@ class Agent:
         # 计算目标值
         with torch.no_grad():
             next_actions = self.actor_target(next_states)
-            # 给目标动作添加噪声以增加鲁棒性
-            noise = torch.normal(0, self.action_noise_std, next_actions.shape).clamp(
-                -self.action_noise_clip, self.action_noise_clip
-            )
-            next_actions = (next_actions + noise).clamp(
-                -self.action_bound, self.action_bound
-            )
-
             target_q = self.critic_target(next_states, next_actions)
             target = rewards + (1 - dones) * self.gamma * target_q
 
