@@ -2,6 +2,7 @@ import numpy as np
 
 from window import GameWindow
 
+from typing import Tuple
 
 class Env:
     """游戏环境"""
@@ -22,7 +23,7 @@ class Env:
         state = self.window.get_state()
         return state
 
-    def step(self, action: float) -> tuple[np.ndarray, float, bool]:
+    def step(self, action: float) -> Tuple[np.ndarray, float, bool]:
         """执行一步动作
         Args:
             action: [0,1] 范围内的值，用于计算按压时间
@@ -45,6 +46,6 @@ class Env:
 
     def _to_duration(self, action: float) -> int:
         """将动作值转换为按压时间(ms)"""
-        # 将[-1,1]映射到[300,1100]ms
+        # 将[-1,1]映射到[400,900]ms
         normalized = np.clip(action, -1, 1)
-        return int(300 * normalized + 700)
+        return int(250 * normalized + 650)

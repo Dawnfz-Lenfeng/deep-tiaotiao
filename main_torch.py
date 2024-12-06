@@ -1,12 +1,12 @@
-import copy
+import torch
+import os
 import pickle
 import time
-
-import tensorflow as tf
-
+import copy
 from config import Config
-from DDPG import Agent
+from DDPG_torch import Agent
 from env import Env
+from typing import List
 
 
 class DDPGTrainer:
@@ -15,36 +15,73 @@ class DDPGTrainer:
         self.env = Env()
         self.agent = Agent(self.env)
         self.setup_checkpointing()
-        self.load_memory()
+        self.load_checkpoint()
 
     def setup_checkpointing(self):
         """设置检查点"""
-        self.ckpt = tf.train.Checkpoint(
-            actor=self.agent.actor,
-            actor_target=self.agent.actor_target,
-            critic=self.agent.critic,
-            critic_target=self.agent.critic_target,
+        self.checkpoint_path = self.config.CHECKPOINT_PATH
+        self.max_to_keep = 5
+
+        # 确保检查点目录存在，如果不存在则创建
+        if not os.path.exists(self.checkpoint_path):
+            os.makedirs(self.checkpoint_path)
+            print(f"Checkpoint directory {self.checkpoint_path} created.")
+
+        # 尝试加载最新的检查点
+        self.load_checkpoint()
+
+    def load_checkpoint(self):
+        """加载最新的检查点"""
+        checkpoint_files = sorted(
+            [f for f in os.listdir(self.checkpoint_path) if f.endswith('.pth')],
+            key=lambda x: int(x.split('_')[1].split('.')[0])
         )
-        self.ckpt_manager = tf.train.CheckpointManager(
-            self.ckpt, self.config.CHECKPOINT_PATH, max_to_keep=5
-        )
 
-        if self.ckpt_manager.latest_checkpoint:
-            self.ckpt.restore(self.ckpt_manager.latest_checkpoint)
-            print("Latest checkpoint restored!")
+        if checkpoint_files:
+            latest_checkpoint = checkpoint_files[-1]
+            checkpoint = torch.load(os.path.join(self.checkpoint_path, latest_checkpoint))
 
-    def load_memory(self):
-        if self.config.MEMORY_FILE.exists():
-            with open(self.config.MEMORY_FILE, "rb") as f:
-                self.agent.memory = pickle.load(f)
+            self.agent.actor.load_state_dict(checkpoint['actor_state_dict'])
+            self.agent.actor_target.load_state_dict(checkpoint['actor_target_state_dict'])
+            self.agent.critic.load_state_dict(checkpoint['critic_state_dict'])
+            self.agent.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
+            self.agent.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+            self.agent.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
 
-    def save_progress(self, scores: list[int], episode: int, steps: int):
+            print(f"Latest checkpoint {latest_checkpoint} restored!")
+        else:
+            print("No checkpoint found, starting fresh.")
+
+    def save_progress(self, scores: List[int], episode: int, steps: int):
         save_data = (scores, episode, steps)
+
+        # 保存 scores 和 memory
         with self.config.SCORES_FILE.open("wb") as f:
             pickle.dump(save_data, f)
         with self.config.MEMORY_FILE.open("wb") as f:
             pickle.dump(self.agent.memory, f)
-        self.ckpt_manager.save()
+
+        # 保存模型和优化器
+        checkpoint = {
+            'actor_state_dict': self.agent.actor.state_dict(),
+            'actor_target_state_dict': self.agent.actor_target.state_dict(),
+            'critic_state_dict': self.agent.critic.state_dict(),
+            'critic_target_state_dict': self.agent.critic_target.state_dict(),
+            'actor_optimizer_state_dict': self.agent.actor_optimizer.state_dict(),
+            'critic_optimizer_state_dict': self.agent.critic_optimizer.state_dict(),
+        }
+
+        # 保持最多 max_to_keep 个检查点
+        checkpoint_files = sorted(
+            [f for f in os.listdir(self.checkpoint_path) if f.endswith('.pth')],
+            key=lambda x: int(x.split('_')[1].split('.')[0])
+        )
+        if len(checkpoint_files) >= self.max_to_keep:
+            os.remove(os.path.join(self.checkpoint_path, checkpoint_files[0]))
+
+        checkpoint_file = os.path.join(self.checkpoint_path, f"checkpoint_{episode}.pth")
+        torch.save(checkpoint, checkpoint_file)
+        print(f"Checkpoint saved to {checkpoint_file}")
 
     def train(self):
         start_time = time.time()
