@@ -20,50 +20,83 @@ class Experience:
     done: bool  # 是否结束
 
 
-class ReplayBuffer:
-    """经验回放缓冲区"""
+class PrioritizedReplayBuffer:
+    """优先经验回放缓冲区"""
 
-    def __init__(self, capacity: int = 10000) -> None:
+    def __init__(
+        self, capacity: int = 10000, alpha: float = 0.6, beta: float = 0.4
+    ) -> None:
         self.capacity = capacity
-        self.buffer: list[Experience] = [None] * capacity  # 预分配列表空间
-        self.position = 0  # 当前插入位置
+        self.alpha = alpha  # 优先级的程度
+        self.beta = beta  # 重要性采样的程度
+        self.beta_increment = 0.001  # beta的增长率
+        self.epsilon = 1e-6  # 防止优先级为0
+
+        self.buffer: list[Experience] = [None] * capacity
+        self.priorities = np.zeros(capacity, dtype=np.float32)
+        self.position = 0
         self.size = 0
 
     def push(
         self,
         state: np.ndarray,
         action: float,
-        reward: int,
+        reward: float,
         next_state: np.ndarray,
         done: bool,
     ) -> None:
-        """添加一个新的经验到缓冲区"""
+        """添加新经验"""
         exp = Experience(state, action, reward, next_state, done)
+
+        # 新经验获得最高优先级
+        max_priority = np.max(self.priorities) if self.size > 0 else 1.0
+
         self.buffer[self.position] = exp
+        self.priorities[self.position] = max_priority
+
         self.position = (self.position + 1) % self.capacity
-        if self.size < self.capacity:
-            self.size += 1
+        self.size = min(self.size + 1, self.capacity)
 
-    def sample(
-        self, batch_size: int
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """随机采样一个批次的经验"""
-        replace = self.size < batch_size  # 小于于批次大小则允许重复采样
-        indices = np.random.choice(self.size, batch_size, replace=replace)
+    def sample(self, batch_size: int):
+        """采样一个批次的经验"""
+        # 计算采样概率
+        priorities = self.priorities[: self.size]
+        probs = priorities**self.alpha
+        probs /= probs.sum()
 
-        batch: list[Experience] = [self.buffer[i] for i in indices]
+        # 采样索引
+        indices = np.random.choice(self.size, batch_size, p=probs)
 
-        # 拆分批次数据
+        # 计算重要性权重
+        total = self.size
+        weights = (total * probs[indices]) ** (-self.beta)
+        weights /= weights.max()
+        self.beta = min(1.0, self.beta + self.beta_increment)  # beta逐渐增加到1
+
+        # 获取经验数据
+        batch: list[Experience] = [self.buffer[idx] for idx in indices]
         states = np.array([e.state for e in batch])
         actions = np.array([e.action for e in batch])
         rewards = np.array([e.reward for e in batch])
         next_states = np.array([e.next_state for e in batch])
         dones = np.array([e.done for e in batch])
 
-        return states, actions, rewards, next_states, dones
+        return (
+            torch.FloatTensor(states),
+            torch.FloatTensor(actions),
+            torch.FloatTensor(rewards).unsqueeze(1),
+            torch.FloatTensor(next_states),
+            torch.FloatTensor(dones).unsqueeze(1),
+            indices,  # 返回索引用于更新优先级
+            torch.FloatTensor(weights).unsqueeze(1),  # 返回权重用于TD误差加权
+        )
+
+    def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray) -> None:
+        """更新优先级"""
+        for idx, td_error in zip(indices, td_errors):
+            self.priorities[idx] = abs(td_error) + self.epsilon
 
     def __len__(self) -> int:
-        """返回当前缓冲区中的经验数量"""
         return self.size
 
 
@@ -91,15 +124,19 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
         self.action_bound = action_bound
 
-        # 简化的卷积层
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        # 两层卷积足够提取位置特征
+        self.conv1 = nn.Conv2d(
+            1, 32, kernel_size=5, stride=2, padding=2
+        )  # 28x28 -> 14x14
 
-        # 简化的全连接层
-        self.fc1 = nn.Linear(64 * 7 * 7, 200)
-        self.fc2 = nn.Linear(200, action_dim)
+        self.conv2 = nn.Conv2d(
+            32, 64, kernel_size=5, stride=2, padding=2
+        )  # 14x14 -> 7x7
 
-        # 添加dropout防止过拟合
+        # 全连接层
+        self.fc1 = nn.Linear(64 * 7 * 7, 128)  # 减小全连接层
+        self.fc2 = nn.Linear(128, action_dim)
+
         self.dropout = nn.Dropout(0.1)
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
@@ -110,9 +147,8 @@ class Actor(nn.Module):
 
         x = x.view(x.size(0), -1)
         x = self.dropout(F.relu(self.fc1(x)))
+        x = 2 * torch.sigmoid(self.fc2(x)) - 1  # 直接输出[-1,1]范围的按压时间
 
-        # 使用sigmoid将输出映射到[0,1]，然后转换到[-1,1]
-        x = 2 * torch.sigmoid(self.fc2(x)) - 1
         return x * self.action_bound
 
 
@@ -121,15 +157,20 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         # 状态编码器
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(
+            1, 32, kernel_size=5, stride=2, padding=2
+        )  # 28x28 -> 14x14
+
+        self.conv2 = nn.Conv2d(
+            32, 64, kernel_size=5, stride=2, padding=2
+        )  # 14x14 -> 7x7
 
         # 动作处理
         self.action_fc = nn.Linear(action_dim, 64)
 
         # 合并层
-        self.fc1 = nn.Linear(64 * 7 * 7 + 64, 200)
-        self.fc2 = nn.Linear(200, 1)
+        self.fc1 = nn.Linear(64 * 7 * 7 + 64, 128)
+        self.fc2 = nn.Linear(128, 1)
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         # 处理状态
@@ -153,7 +194,7 @@ class Agent:
     """DDPG智能体"""
 
     def __init__(
-        self, env: Env, memory_capacity: int = 1000, batch_size: int = 64
+        self, env: Env, memory_capacity: int = 10000, batch_size: int = 64
     ) -> None:
         self.env = env
         self.state_dim = env.state_dim
@@ -176,7 +217,7 @@ class Agent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
 
         # 经验回放
-        self.memory = ReplayBuffer(memory_capacity)
+        self.memory = PrioritizedReplayBuffer(memory_capacity)
 
         # 修改训练超参数
         self.gamma = 0.99  # 折扣因子
@@ -223,70 +264,50 @@ class Agent:
         self.memory.push(state, action, reward, next_state, done)
 
     def replay(self) -> torch.Tensor:
-        """从经验回放中学习"""
-        if len(self.memory) < 2:  # 至少需要2个样本
+        """从优先经验回放中学习"""
+        if len(self.memory) < self.batch_size:
             return torch.tensor(0.0)
 
-        # 使用所有可用样本，但不超过batch_size
-        actual_batch_size = min(len(self.memory), self.batch_size)
-
-        states, actions, rewards, next_states, dones = self.memory.sample(
-            actual_batch_size
+        # 采样带有权重的经验
+        states, actions, rewards, next_states, dones, indices, weights = (
+            self.memory.sample(self.batch_size)
         )
 
-        states = torch.tensor(states, dtype=torch.float32)
-        actions = torch.tensor(actions, dtype=torch.float32)
-        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
-        next_states = torch.tensor(next_states, dtype=torch.float32)
-        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
-
-        # 更新网络
-        critic_loss = self._update_critic(states, actions, rewards, next_states, dones)
-        self._update_actor(states)
-        self._update_target_networks()
-
-        # 衰减探索噪声
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-
-        return critic_loss
-
-    def _update_critic(
-        self,
-        states: torch.Tensor,
-        actions: torch.Tensor,
-        rewards: torch.Tensor,
-        next_states: torch.Tensor,
-        dones: torch.Tensor,
-    ) -> torch.Tensor:
-        """更新Critic网络"""
-        # 计算目标值
+        # 计算TD误差和critic损失
         with torch.no_grad():
             next_actions = self.actor_target(next_states)
             target_q = self.critic_target(next_states, next_actions)
             target = rewards + (1 - dones) * self.gamma * target_q
 
-        # 计算Critic损失
         current_q = self.critic(states, actions)
-        critic_loss = F.mse_loss(current_q, target)
+        td_errors = (target - current_q).detach().numpy()
 
-        # 优化Critic网络
+        # 更新优先级
+        self.memory.update_priorities(indices, td_errors)
+
+        # 使用重要性权重的critic损失
+        critic_loss = (weights * F.mse_loss(current_q, target, reduction="none")).mean()
+
+        # 更新网络
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        # 添加梯度裁剪
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
         self.critic_optimizer.step()
 
-        return critic_loss
+        # 更新actor
+        actor_loss = -(weights * self.critic(states, self.actor(states))).mean()
 
-    def _update_actor(self, states: torch.Tensor) -> None:
-        """更新Actor网络"""
-        # 计算Actor的梯度
-        actor_loss = -self.critic(states, self.actor(states)).mean()
-
-        # 优化Actor网络
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+        # 软更新目标网络
+        self._update_target_networks()
+
+        # 衰减探索率
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+        return critic_loss
 
     def _update_target_networks(self) -> None:
         """软更新目标网络"""
