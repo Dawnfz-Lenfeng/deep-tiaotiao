@@ -32,7 +32,8 @@ class DDPGTrainer:
         self.load_checkpoint()
 
     def load_checkpoint(self):
-        """加载最新的检查点"""
+        """加载最新的检查点和经验回放"""
+        # 加载模型检查点
         checkpoint_files = sorted(
             [f for f in os.listdir(self.checkpoint_path) if f.endswith(".pth")],
             key=lambda x: int(x.split("_")[1].split(".")[0]),
@@ -58,10 +59,19 @@ class DDPGTrainer:
             self.agent.critic_optimizer.load_state_dict(
                 checkpoint["critic_optimizer_state_dict"]
             )
-
             print(f"Latest checkpoint {latest_checkpoint} restored!")
         else:
             print("No checkpoint found, starting fresh.")
+
+        # 加载经验回放缓冲区
+        if self.config.MEMORY_FILE.exists():
+            try:
+                with self.config.MEMORY_FILE.open("rb") as f:
+                    self.agent.memory = pickle.load(f)
+                print(f"Loaded {len(self.agent.memory)} experiences from memory file")
+            except Exception as e:
+                print(f"Failed to load memory file: {e}")
+                print("Starting with empty memory")
 
     def save_progress(self, scores: list[int], episode: int, steps: int):
         save_data = (scores, episode, steps)
@@ -97,12 +107,16 @@ class DDPGTrainer:
         print(f"Checkpoint saved to {checkpoint_file}")
 
     def train(self):
-        # 添加预训练
-        self.agent.pretrain(num_episodes=10)
-        
         start_time = time.time()
         scores = []
         total_steps = 0
+
+        # 只在经验不足时进行预训练
+        if len(self.agent.memory) < self.agent.batch_size:
+            print(f"Insufficient experiences ({len(self.agent.memory)} < {self.agent.batch_size})")
+            self.agent.pretrain(num_episodes=10)
+        else:
+            print(f"Found {len(self.agent.memory)} experiences, skipping pretrain")
 
         for episode in range(self.config.EPISODES):
             episode_score, episode_steps, episode_loss = self.run_training_episode()
