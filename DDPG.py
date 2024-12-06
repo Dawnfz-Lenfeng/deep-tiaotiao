@@ -1,9 +1,10 @@
 from dataclasses import dataclass
-import torch.optim as optim
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 
 from env import Env
 
@@ -47,7 +48,7 @@ class ReplayBuffer:
         self, batch_size: int
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """随机采样一个批次的经验"""
-        indices = np.random.choice(self.size, batch_size, replace=False)
+        indices = np.random.choice(self.size, batch_size, replace=True)
         batch: list[Experience] = [self.buffer[i] for i in indices]
 
         # 拆分批次数据
@@ -156,11 +157,14 @@ class Agent:
 
     def replay(self) -> torch.Tensor:
         """从经验回放中学习"""
-        if len(self.memory) < self.batch_size:
+        if len(self.memory) < 2:  # 至少需要2个样本
             return torch.tensor(0.0)
 
+        # 使用所有可用样本，但不超过batch_size
+        actual_batch_size = min(len(self.memory), self.batch_size)
+
         states, actions, rewards, next_states, dones = self.memory.sample(
-            self.batch_size
+            actual_batch_size
         )
 
         states = torch.tensor(states, dtype=torch.float32)
@@ -230,3 +234,21 @@ class Agent:
             target_param.data.copy_(
                 self.tau * param.data + (1 - self.tau) * target_param.data
             )
+
+    def pretrain(self, num_episodes: int = 10) -> None:
+        """预训练阶段，收集一些初始经验"""
+        print("Starting pretrain phase...")
+        for episode in range(num_episodes):
+            state = self.env.reset()
+            done = False
+            while not done:
+                # 随机动作
+                action = np.random.uniform(
+                    -self.action_bound, self.action_bound, self.action_dim
+                )
+                next_state, reward, done = self.env.step(action)
+                # 存储经验
+                self.remember(state, action, reward, next_state, done)
+                state = next_state
+            print(f"Pretrain episode {episode + 1}/{num_episodes} complete.")
+        print(f"Pretrain complete. Collected {len(self.memory)} experiences.")

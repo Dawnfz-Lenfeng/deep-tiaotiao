@@ -1,8 +1,10 @@
-import torch
+import copy
 import os
 import pickle
 import time
-import copy
+
+import torch
+
 from config import Config
 from DDPG import Agent
 from env import Env
@@ -95,6 +97,9 @@ class DDPGTrainer:
         print(f"Checkpoint saved to {checkpoint_file}")
 
     def train(self):
+        # 添加预训练
+        self.agent.pretrain(num_episodes=10)
+        
         start_time = time.time()
         scores = []
         total_steps = 0
