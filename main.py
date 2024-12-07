@@ -15,6 +15,7 @@ class DDPGTrainer:
         self.config = Config()
         self.env = Env()
         self.agent = Agent(self.env)
+        self.current_episode = 0
         self.setup_checkpointing()
         self.load_checkpoint()
 
@@ -45,6 +46,7 @@ class DDPGTrainer:
                 os.path.join(self.checkpoint_path, latest_checkpoint)
             )
 
+            # 加载网络和优化器状态
             self.agent.actor.load_state_dict(checkpoint["actor_state_dict"])
             self.agent.actor_target.load_state_dict(
                 checkpoint["actor_target_state_dict"]
@@ -59,6 +61,10 @@ class DDPGTrainer:
             self.agent.critic_optimizer.load_state_dict(
                 checkpoint["critic_optimizer_state_dict"]
             )
+
+            # 获取当前episode
+            self.current_episode = int(latest_checkpoint.split("_")[1].split(".")[0])
+            print(f"Resuming from episode {self.current_episode}")
             print(f"Latest checkpoint {latest_checkpoint} restored!")
         else:
             print("No checkpoint found, starting fresh.")
@@ -107,8 +113,7 @@ class DDPGTrainer:
         print(f"Checkpoint saved to {checkpoint_file}")
 
     def train(self):
-        best_score = float('-inf')
-        patience = 10
+        best_score = float("-inf")
         no_improve = 0
         scores = []
         start_time = time.time()
@@ -116,16 +121,24 @@ class DDPGTrainer:
 
         # 只在经验不足时进行预训练
         if len(self.agent.memory) < self.agent.batch_size:
-            print(f"Insufficient experiences ({len(self.agent.memory)} < {self.agent.batch_size})")
+            print(
+                f"Insufficient experiences ({len(self.agent.memory)} < {self.agent.batch_size})"
+            )
             self.agent.pretrain(num_episodes=10)
         else:
             print(f"Found {len(self.agent.memory)} experiences, skipping pretrain")
-        
-        for episode in range(self.config.EPISODES):
-            episode_score, episode_steps, episode_loss, total_reward = self.run_training_episode()
+
+        # 从当前episode继续训练
+        for episode in range(self.current_episode, self.config.EPISODES):
+            (
+                episode_score,
+                episode_steps,
+                episode_loss,
+                total_reward,
+            ) = self.run_training_episode()
             total_steps += episode_steps
             scores.append(episode_score)
-            
+
             # 检查是否有改进
             if episode_score > best_score:
                 best_score = episode_score

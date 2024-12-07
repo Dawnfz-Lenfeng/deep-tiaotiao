@@ -100,41 +100,24 @@ class PrioritizedReplayBuffer:
         return self.size
 
 
-class ResBlock(nn.Module):
-    """残差块"""
-
-    def __init__(self, channels: int, size: int = 28):
-        super(ResBlock, self).__init__()
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        self.ln1 = nn.LayerNorm([channels, size, size])
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        self.ln2 = nn.LayerNorm([channels, size, size])
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        x = F.relu(self.ln1(self.conv1(x)))
-        x = self.ln2(self.conv2(x))
-        x += residual
-        x = F.relu(x)
-        return x
-
-
 class Actor(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, action_bound: float) -> None:
         super(Actor, self).__init__()
         self.action_bound = action_bound
 
-        # 两层卷积足够提取位置特征
+        # 三层卷积结构
         self.conv1 = nn.Conv2d(
-            1, 32, kernel_size=5, stride=2, padding=2
-        )  # 28x28 -> 14x14
-
+            1, 32, kernel_size=3, stride=1, padding=1
+        )  # 28x28 -> 28x28
         self.conv2 = nn.Conv2d(
-            32, 64, kernel_size=5, stride=2, padding=2
+            32, 64, kernel_size=3, stride=2, padding=1
+        )  # 28x28 -> 14x14
+        self.conv3 = nn.Conv2d(
+            64, 64, kernel_size=3, stride=2, padding=1
         )  # 14x14 -> 7x7
 
         # 全连接层
-        self.fc1 = nn.Linear(64 * 7 * 7, 128)  # 减小全连接层
+        self.fc1 = nn.Linear(64 * 7 * 7, 128)
         self.fc2 = nn.Linear(128, action_dim)
 
         self.dropout = nn.Dropout(0.1)
@@ -142,12 +125,13 @@ class Actor(nn.Module):
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         x = state.view(-1, 1, 28, 28)
 
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv1(x))  # 提取基本特征
+        x = F.relu(self.conv2(x))  # 第一次降采样
+        x = F.relu(self.conv3(x))  # 第二次降采样
 
         x = x.view(x.size(0), -1)
         x = self.dropout(F.relu(self.fc1(x)))
-        x = 2 * torch.sigmoid(self.fc2(x)) - 1  # 直接输出[-1,1]范围的按压时间
+        x = 2 * torch.sigmoid(self.fc2(x)) - 1
 
         return x * self.action_bound
 
@@ -158,11 +142,13 @@ class Critic(nn.Module):
 
         # 状态编码器
         self.conv1 = nn.Conv2d(
-            1, 32, kernel_size=5, stride=2, padding=2
-        )  # 28x28 -> 14x14
-
+            1, 32, kernel_size=3, stride=1, padding=1
+        )  # 28x28 -> 28x28
         self.conv2 = nn.Conv2d(
-            32, 64, kernel_size=5, stride=2, padding=2
+            32, 64, kernel_size=3, stride=2, padding=1
+        )  # 28x28 -> 14x14
+        self.conv3 = nn.Conv2d(
+            64, 64, kernel_size=3, stride=2, padding=1
         )  # 14x14 -> 7x7
 
         # 动作处理
@@ -173,10 +159,12 @@ class Critic(nn.Module):
         self.fc2 = nn.Linear(128, 1)
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        # 处理状态
         x = state.view(-1, 1, 28, 28)
+
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+
         x = x.view(x.size(0), -1)
 
         # 处理动作
@@ -222,13 +210,9 @@ class Agent:
         # 修改训练超参数
         self.gamma = 0.99  # 折扣因子
         self.tau = 0.001  # 软更新参数
-        self.epsilon = 0.4  # 进一步增大初始探索率
+        self.epsilon = 0.2  # 进一步增大初始探索率
         self.epsilon_decay = 0.995  # 降低衰减速率
         self.epsilon_min = 0.01  # 提高最小探索值
-
-        # 减小动作噪声
-        self.action_noise_std = 0.1  # 降低噪声标准差
-        self.action_noise_clip = 0.3  # 降低噪声裁剪范围
 
     def act(self, state: np.ndarray) -> np.ndarray:
         """选择动作"""
@@ -244,12 +228,9 @@ class Agent:
             action = np.random.uniform(
                 -self.action_bound, self.action_bound, size=self.action_dim
             )
-        else:
-            # 在当前策略基础上添加噪声
-            noise = np.random.normal(0, self.action_noise_std, size=self.action_dim)
-            noise = np.clip(noise, -self.action_noise_clip, self.action_noise_clip)
-            action = np.clip(action + noise, -self.action_bound, self.action_bound)
+            print("随机", end="")
 
+        print("动作", action)
         return action
 
     def remember(
@@ -269,9 +250,15 @@ class Agent:
             return torch.tensor(0.0)
 
         # 采样带有权重的经验
-        states, actions, rewards, next_states, dones, indices, weights = (
-            self.memory.sample(self.batch_size)
-        )
+        (
+            states,
+            actions,
+            rewards,
+            next_states,
+            dones,
+            indices,
+            weights,
+        ) = self.memory.sample(self.batch_size)
 
         # 计算TD误差和critic损失
         with torch.no_grad():
