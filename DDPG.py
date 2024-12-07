@@ -266,6 +266,7 @@ class Agent:
         # 仅在训练模式下添加噪声
         if self.training:
             noise = self.noise.sample()
+            print("噪声", noise)
             action = np.clip(action + noise, -self.action_bound, self.action_bound)
 
         print("动作", action)
