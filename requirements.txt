@@ -1,4 +1,4 @@
-tensorflow
+torch
 matplotlib
 seaborn
 opencv-python

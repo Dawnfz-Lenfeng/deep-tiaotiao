@@ -178,43 +178,6 @@ class Critic(nn.Module):
         return value
 
 
-class OUNoise:
-    """Ornstein-Uhlenbeck噪声"""
-
-    def __init__(
-        self,
-        action_dim: int,
-        mu: float = 0,
-        theta: float = 0.15,
-        sigma: float = 0.15,
-        sigma_min: float = 0.05,
-        decay_rate: float = 0.995,
-    ) -> None:
-        self.action_dim = action_dim
-        self.mu = mu
-        self.theta = theta
-        self.sigma = sigma
-        self.sigma_min = sigma_min  # 最小噪声幅度
-        self.decay_rate = decay_rate  # 衰减率
-        self.reset()
-
-    def reset(self) -> None:
-        """重置噪声状态"""
-        self.state = np.ones(self.action_dim) * self.mu
-
-    def sample(self) -> np.ndarray:
-        """生成噪声"""
-        dx = self.theta * (self.mu - self.state) + self.sigma * np.random.randn(
-            self.action_dim
-        )
-        self.state += dx
-        return self.state
-
-    def decay_noise(self) -> None:
-        """衰减噪声幅度"""
-        self.sigma = max(self.sigma_min, self.sigma * self.decay_rate)
-
-
 class Agent:
     """DDPG智能体"""
 
@@ -247,11 +210,13 @@ class Agent:
         # 修改训练超参数
         self.gamma = 0.99  # 折扣因子
         self.tau = 0.001  # 软更新参数
+        self.epsilon = 0.4  # 进一步增大初始探索率
+        self.epsilon_decay = 0.995  # 降低衰减速率
+        self.epsilon_min = 0.01  # 提高最小探索值
 
-        # 添加OU噪声
-        self.noise = OUNoise(self.action_dim)
-
-        self.training = True  # 添加训练模式标志
+        # 减小动作噪声
+        self.action_noise_std = 0.1  # 降低噪声标准差
+        self.action_noise_clip = 0.3  # 降低噪声裁剪范围
 
     def act(self, state: np.ndarray) -> np.ndarray:
         """选择动作"""
@@ -263,26 +228,14 @@ class Agent:
 
         self.actor.train()
 
-        # 仅在训练模式下添加噪声
-        if self.training:
-            noise = self.noise.sample()
-            print("噪声", noise)
-            action = np.clip(action + noise, -self.action_bound, self.action_bound)
+        if np.random.rand() < self.epsilon:
+            action = np.random.uniform(
+                -self.action_bound, self.action_bound, size=self.action_dim
+            )
+            print("随机", end="")
 
         print("动作", action)
         return action
-
-    def train(self) -> None:
-        """设置为训练模式"""
-        self.training = True
-        self.actor.train()
-        self.critic.train()
-
-    def eval(self) -> None:
-        """设置为评估模式"""
-        self.training = False
-        self.actor.eval()
-        self.critic.eval()
 
     def remember(
         self,
@@ -301,21 +254,15 @@ class Agent:
             return torch.tensor(0.0)
 
         # 采样带有权重的经验
-        (
-            states,
-            actions,
-            rewards,
-            next_states,
-            dones,
-            indices,
-            weights,
-        ) = self.memory.sample(self.batch_size)
+        states, actions, rewards, next_states, dones, indices, weights = (
+            self.memory.sample(self.batch_size)
+        )
 
         # 计算TD误差和critic损失
         with torch.no_grad():
             next_actions = self.actor_target(next_states)
             target_q = self.critic_target(next_states, next_actions)
-            target = rewards + (1 - dones) * self.gamma * target_q
+            target = rewards + self.gamma * target_q
 
         current_q = self.critic(states, actions)
         td_errors = (target - current_q).detach().numpy()
@@ -342,8 +289,8 @@ class Agent:
         # 软更新目标网络
         self._update_target_networks()
 
-        # 在每次学习后衰减噪声
-        self.noise.decay_noise()
+        # 衰减探索率
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
         return critic_loss
 

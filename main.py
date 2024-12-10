@@ -46,7 +46,6 @@ class DDPGTrainer:
                 os.path.join(self.checkpoint_path, latest_checkpoint)
             )
 
-            # 加载网络和优化器状态
             self.agent.actor.load_state_dict(checkpoint["actor_state_dict"])
             self.agent.actor_target.load_state_dict(
                 checkpoint["actor_target_state_dict"]
@@ -128,9 +127,6 @@ class DDPGTrainer:
         else:
             print(f"Found {len(self.agent.memory)} experiences, skipping pretrain")
 
-        # 设置为训练模式
-        self.agent.train()
-
         # 从当前episode继续训练
         for episode in range(self.current_episode, self.config.EPISODES):
             (
@@ -189,10 +185,8 @@ class DDPGTrainer:
         )
 
     def test(self):
-        # 设置为评估模式
-        self.agent.eval()
-
         scores = []
+
         for episode in range(self.config.TEST_EPISODES):
             episode_score = self.run_test_episode()
             scores.append(episode_score)
@@ -206,10 +200,7 @@ class DDPGTrainer:
         state = self.env.reset()
 
         for step in range(self.config.TEST_MAX_STEPS):
-            # 直接使用actor网络输出，不需要调用agent.act()
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
-            with torch.no_grad():
-                action = self.agent.actor(state_tensor).numpy()[0]
+            action = self.agent.actor(state)
             next_state, reward, done = self.env.step(action)
             state = copy.deepcopy(next_state)
 

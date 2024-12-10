@@ -13,6 +13,7 @@ class GameWindow:
         # 加载模板图片
         self.start_btn = cv2.imread("pic/start.png", cv2.IMREAD_GRAYSCALE)
         self.restart_btn = cv2.imread("pic/restart.png", cv2.IMREAD_GRAYSCALE)
+        self.chequer = cv2.imread('pic/chequer.png', cv2.IMREAD_GRAYSCALE)
         self.game_region = None
         self.window_name = "跳一跳"  # 微信小程序窗口名称
 
@@ -43,7 +44,7 @@ class GameWindow:
         screen = self.get_screenshot()
         result = cv2.matchTemplate(screen, self.restart_btn, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
-        return max_val > 0.8
+        return max_val > 0.5
 
     def get_screenshot(self) -> np.ndarray:
         """获取游戏区域的截图"""
@@ -66,6 +67,16 @@ class GameWindow:
     def get_state(self) -> np.ndarray:
         """获取当前状态特征"""
         screen = self.get_screenshot()
+        #cut
+        result = cv2.matchTemplate(self.chequer, screen, cv2.TM_CCOEFF_NORMED)
+        # 获取匹配结果的最大值和最大位置
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        # 获取模板图像的高度和宽度
+        h, w = self.chequer.shape[:2]
+        # # 计算左下角坐标
+        # left_bottom = (max_loc[0], max_loc[1] + h)
+        # h1, w1 = screen.shape[:2]
+        screen = screen[:, max_loc[1] - 3*h:max_loc[1] + h ]
         # 缩放到28x28
         resized = cv2.resize(screen, (28, 28))
         # 归一化到[0,1]
