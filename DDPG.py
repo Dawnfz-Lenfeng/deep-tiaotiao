@@ -275,24 +275,20 @@ class Agent:
 
         # 计算TD误差和critic损失
         with torch.no_grad():
-            # next_actions = self.actor_target(next_states)
-            # print(next_actions)
             target_q_values = []
             search_num = 500
-            # 遍历1000个向量
+
             for i in range(search_num):
-                # 生成一个长为64的向量，元素服从[0, 1)上的均匀分布
+                # 均匀采样[-1, 1]之间的随机动作
                 action = torch.ones(64) * (i/500)
-                # 将该向量映射到[-1, 1]区间
                 action = 2 * action - 1
                 action = action.unsqueeze(1)
                 # 计算对应的 target_q
                 target_q = self.critic_target(next_states, action)
-                # 将计算得到的 target_q 保存到列表中
                 target_q_values.append(target_q)
-            # 转换为 numpy 数组，以便计算最大值
-            target_q_values = np.array(target_q_values)
+
             # 找到最大 target_q 的值
+            target_q_values = np.array(target_q_values)
             max_target_q = np.max(target_q_values)
 
             target = rewards + self.gamma * max_target_q
