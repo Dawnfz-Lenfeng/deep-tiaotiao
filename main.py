@@ -2,7 +2,7 @@ import copy
 import os
 import pickle
 import time
-
+import csv
 import torch
 
 from config import Config
@@ -118,12 +118,22 @@ class DDPGTrainer:
         start_time = time.time()
         total_steps = 0
 
+        csv_file = 'training_progress.csv'
+
+        # 检测CSV文件是否存在，若不存在则创建并写入表头
+        if not os.path.exists(csv_file):
+            with open(csv_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    'Episode', 'Total Steps', 'Total Reward', 'Episode Loss', 'Episode Score', 'Best Score'
+                ])
+
         # 只在经验不足时进行预训练
         if len(self.agent.memory) < self.agent.batch_size:
             print(
                 f"Insufficient experiences ({len(self.agent.memory)} < {self.agent.batch_size})"
             )
-            self.agent.pretrain(num_episodes=10)
+            self.agent.pretrain(num_episodes=1)
         else:
             print(f"Found {len(self.agent.memory)} experiences, skipping pretrain")
 
@@ -150,6 +160,13 @@ class DDPGTrainer:
                 f"Reward: {total_reward}, Loss: {episode_loss}, Score: {episode_score}, "
                 f"Best: {best_score}"
             )
+
+            # 将当前训练数据写入CSV文件
+            with open(csv_file, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    episode, total_steps, total_reward, episode_loss, episode_score, best_score
+                ])
 
             if episode % self.config.SAVE_FREQUENCY == 0:
                 self.save_progress(scores, episode, total_steps)
@@ -185,7 +202,20 @@ class DDPGTrainer:
         )
 
     def test(self):
+        # 设置为评估模式
+        self.agent.eval()
+
         scores = []
+
+        csv_file = 'test_progress.csv'
+
+        # 检测CSV文件是否存在，若不存在则创建并写入表头
+        if not os.path.exists(csv_file):
+            with open(csv_file, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    'Test Episode', 'Score', 'Max Score'
+                ])
 
         for episode in range(self.config.TEST_EPISODES):
             episode_score = self.run_test_episode()
@@ -196,11 +226,21 @@ class DDPGTrainer:
                 f"Max Score: {max(scores)}"
             )
 
+            # 将当前测试数据写入CSV文件
+            with open(csv_file, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    episode, episode_score, max(scores)
+                ])
+
     def run_test_episode(self):
         state = self.env.reset()
 
         for step in range(self.config.TEST_MAX_STEPS):
-            action = self.agent.actor(state)
+            # 直接使用actor网络输出，不需要调用agent.act()
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            with torch.no_grad():
+                action = self.agent.actor(state_tensor).numpy()[0]
             next_state, reward, done = self.env.step(action)
             state = copy.deepcopy(next_state)
 
@@ -214,8 +254,8 @@ def main():
     trainer = DDPGTrainer()
 
     # Uncomment the one you want to run
-    trainer.train()
-    # trainer.test()
+    # trainer.train()
+    trainer.test()
 
 
 if __name__ == "__main__":

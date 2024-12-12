@@ -3,3 +3,4 @@ tiaoyitiao/
 .idea/
 data/
 checkpoints/
+*.csv

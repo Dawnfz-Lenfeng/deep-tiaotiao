@@ -218,6 +218,8 @@ class Agent:
         self.action_noise_std = 0.1  # 降低噪声标准差
         self.action_noise_clip = 0.3  # 降低噪声裁剪范围
 
+        self.training = True  # 添加训练模式标志
+
     def act(self, state: np.ndarray) -> np.ndarray:
         """选择动作"""
         self.actor.eval()
@@ -228,14 +230,27 @@ class Agent:
 
         self.actor.train()
 
-        if np.random.rand() < self.epsilon:
-            action = np.random.uniform(
-                -self.action_bound, self.action_bound, size=self.action_dim
-            )
-            print("随机", end="")
+        if self.training:
+            if np.random.rand() < self.epsilon:
+                action = np.random.uniform(
+                    -self.action_bound, self.action_bound, size=self.action_dim
+                )
+                print("随机", end="")
 
-        print("动作", action)
-        return action
+            print("动作", action)
+            return action
+
+    def train(self) -> None:
+        """设置为训练模式"""
+        self.training = True
+        self.actor.train()
+        self.critic.train()
+
+    def eval(self) -> None:
+        """设置为评估模式"""
+        self.training = False
+        self.actor.eval()
+        self.critic.eval()
 
     def remember(
         self,
@@ -260,9 +275,27 @@ class Agent:
 
         # 计算TD误差和critic损失
         with torch.no_grad():
-            next_actions = self.actor_target(next_states)
-            target_q = self.critic_target(next_states, next_actions)
-            target = rewards + self.gamma * target_q
+            # next_actions = self.actor_target(next_states)
+            # print(next_actions)
+            target_q_values = []
+            search_num = 500
+            # 遍历1000个向量
+            for i in range(search_num):
+                # 生成一个长为64的向量，元素服从[0, 1)上的均匀分布
+                action = torch.ones(64) * (i/500)
+                # 将该向量映射到[-1, 1]区间
+                action = 2 * action - 1
+                action = action.unsqueeze(1)
+                # 计算对应的 target_q
+                target_q = self.critic_target(next_states, action)
+                # 将计算得到的 target_q 保存到列表中
+                target_q_values.append(target_q)
+            # 转换为 numpy 数组，以便计算最大值
+            target_q_values = np.array(target_q_values)
+            # 找到最大 target_q 的值
+            max_target_q = np.max(target_q_values)
+
+            target = rewards + self.gamma * max_target_q
 
         current_q = self.critic(states, actions)
         td_errors = (target - current_q).detach().numpy()
@@ -310,7 +343,7 @@ class Agent:
                 self.tau * param.data + (1 - self.tau) * target_param.data
             )
 
-    def pretrain(self, num_episodes: int = 10) -> None:
+    def pretrain(self, num_episodes: int = 1) -> None:
         """预训练阶段，收集一些初始经验"""
         print("Starting pretrain phase...")
         for episode in range(num_episodes):
