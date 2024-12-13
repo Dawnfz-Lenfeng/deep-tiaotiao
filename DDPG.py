@@ -131,7 +131,7 @@ class Actor(nn.Module):
 
         x = x.view(x.size(0), -1)
         x = self.dropout(F.relu(self.fc1(x)))
-        x = 2 * torch.sigmoid(self.fc2(x)) - 1
+        x = torch.sigmoid(self.fc2(x))
 
         return x * self.action_bound
 
@@ -193,11 +193,9 @@ class Agent:
         # 初始化网络
         self.actor = Actor(self.state_dim, self.action_dim, self.action_bound)
         self.critic = Critic(self.state_dim, self.action_dim)
-        self.actor_target = Actor(self.state_dim, self.action_dim, self.action_bound)
         self.critic_target = Critic(self.state_dim, self.action_dim)
 
         # 复制参数到目标网络
-        self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # 优化器
@@ -233,7 +231,7 @@ class Agent:
         if self.training:
             if np.random.rand() < self.epsilon:
                 action = np.random.uniform(
-                    -self.action_bound, self.action_bound, size=self.action_dim
+                    0, self.action_bound, size=self.action_dim
                 )
                 print("随机", end="")
 
@@ -269,9 +267,15 @@ class Agent:
             return torch.tensor(0.0)
 
         # 采样带有权重的经验
-        states, actions, rewards, next_states, dones, indices, weights = (
-            self.memory.sample(self.batch_size)
-        )
+        (
+            states,
+            actions,
+            rewards,
+            next_states,
+            dones,
+            indices,
+            weights,
+        ) = self.memory.sample(self.batch_size)
 
         # 计算TD误差和critic损失
         with torch.no_grad():
@@ -280,8 +284,7 @@ class Agent:
 
             for i in range(search_num):
                 # 均匀采样[-1, 1]之间的随机动作
-                action = torch.ones(64) * (i/500)
-                action = 2 * action - 1
+                action = torch.ones(64) * (i / 500)
                 action = action.unsqueeze(1)
                 # 计算对应的 target_q
                 target_q = self.critic_target(next_states, action)
@@ -326,33 +329,8 @@ class Agent:
     def _update_target_networks(self) -> None:
         """软更新目标网络"""
         for target_param, param in zip(
-            self.actor_target.parameters(), self.actor.parameters()
-        ):
-            target_param.data.copy_(
-                self.tau * param.data + (1 - self.tau) * target_param.data
-            )
-
-        for target_param, param in zip(
             self.critic_target.parameters(), self.critic.parameters()
         ):
             target_param.data.copy_(
                 self.tau * param.data + (1 - self.tau) * target_param.data
             )
-
-    def pretrain(self, num_episodes: int = 1) -> None:
-        """预训练阶段，收集一些初始经验"""
-        print("Starting pretrain phase...")
-        for episode in range(num_episodes):
-            state = self.env.reset()
-            done = False
-            while not done:
-                # 随机动作
-                action = np.random.uniform(
-                    -self.action_bound, self.action_bound, self.action_dim
-                )
-                next_state, reward, done = self.env.step(action)
-                # 存储经验
-                self.remember(state, action, reward, next_state, done)
-                state = next_state
-            print(f"Pretrain episode {episode + 1}/{num_episodes} complete.")
-        print(f"Pretrain complete. Collected {len(self.memory)} experiences.")

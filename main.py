@@ -1,8 +1,9 @@
 import copy
+import csv
 import os
 import pickle
 import time
-import csv
+
 import torch
 
 from config import Config
@@ -47,9 +48,6 @@ class DDPGTrainer:
             )
 
             self.agent.actor.load_state_dict(checkpoint["actor_state_dict"])
-            self.agent.actor_target.load_state_dict(
-                checkpoint["actor_target_state_dict"]
-            )
             self.agent.critic.load_state_dict(checkpoint["critic_state_dict"])
             self.agent.critic_target.load_state_dict(
                 checkpoint["critic_target_state_dict"]
@@ -90,7 +88,6 @@ class DDPGTrainer:
         # 保存模型和优化器
         checkpoint = {
             "actor_state_dict": self.agent.actor.state_dict(),
-            "actor_target_state_dict": self.agent.actor_target.state_dict(),
             "critic_state_dict": self.agent.critic.state_dict(),
             "critic_target_state_dict": self.agent.critic_target.state_dict(),
             "actor_optimizer_state_dict": self.agent.actor_optimizer.state_dict(),
@@ -118,22 +115,28 @@ class DDPGTrainer:
         start_time = time.time()
         total_steps = 0
 
-        csv_file = 'training_progress.csv'
+        csv_file = "training_progress.csv"
 
         # 检测CSV文件是否存在，若不存在则创建并写入表头
         if not os.path.exists(csv_file):
-            with open(csv_file, mode='w', newline='') as file:
+            with open(csv_file, mode="w", newline="") as file:
                 writer = csv.writer(file)
-                writer.writerow([
-                    'Episode', 'Total Steps', 'Total Reward', 'Episode Loss', 'Episode Score', 'Best Score'
-                ])
+                writer.writerow(
+                    [
+                        "Episode",
+                        "Total Steps",
+                        "Total Reward",
+                        "Episode Loss",
+                        "Episode Score",
+                        "Best Score",
+                    ]
+                )
 
         # 只在经验不足时进行预训练
         if len(self.agent.memory) < self.agent.batch_size:
             print(
                 f"Insufficient experiences ({len(self.agent.memory)} < {self.agent.batch_size})"
             )
-            self.agent.pretrain(num_episodes=1)
         else:
             print(f"Found {len(self.agent.memory)} experiences, skipping pretrain")
 
@@ -162,11 +165,18 @@ class DDPGTrainer:
             )
 
             # 将当前训练数据写入CSV文件
-            with open(csv_file, mode='a', newline='') as file:
+            with open(csv_file, mode="a", newline="") as file:
                 writer = csv.writer(file)
-                writer.writerow([
-                    episode, total_steps, total_reward, episode_loss, episode_score, best_score
-                ])
+                writer.writerow(
+                    [
+                        episode,
+                        total_steps,
+                        total_reward,
+                        episode_loss,
+                        episode_score,
+                        best_score,
+                    ]
+                )
 
             if episode % self.config.SAVE_FREQUENCY == 0:
                 self.save_progress(scores, episode, total_steps)
@@ -207,15 +217,13 @@ class DDPGTrainer:
 
         scores = []
 
-        csv_file = 'test_progress.csv'
+        csv_file = "test_progress.csv"
 
         # 检测CSV文件是否存在，若不存在则创建并写入表头
         if not os.path.exists(csv_file):
-            with open(csv_file, mode='w', newline='') as file:
+            with open(csv_file, mode="w", newline="") as file:
                 writer = csv.writer(file)
-                writer.writerow([
-                    'Test Episode', 'Score', 'Max Score'
-                ])
+                writer.writerow(["Test Episode", "Score", "Max Score"])
 
         for episode in range(self.config.TEST_EPISODES):
             episode_score = self.run_test_episode()
@@ -227,11 +235,9 @@ class DDPGTrainer:
             )
 
             # 将当前测试数据写入CSV文件
-            with open(csv_file, mode='a', newline='') as file:
+            with open(csv_file, mode="a", newline="") as file:
                 writer = csv.writer(file)
-                writer.writerow([
-                    episode, episode_score, max(scores)
-                ])
+                writer.writerow([episode, episode_score, max(scores)])
 
     def run_test_episode(self):
         state = self.env.reset()
@@ -254,8 +260,8 @@ def main():
     trainer = DDPGTrainer()
 
     # Uncomment the one you want to run
-    # trainer.train()
-    trainer.test()
+    trainer.train()
+    # trainer.test()
 
 
 if __name__ == "__main__":
